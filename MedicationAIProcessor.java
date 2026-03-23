@@ -1,7 +1,10 @@
+import org.json.JSONObject;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -27,12 +30,13 @@ public class MedicationAIProcessor {
                     continue;
                 }
 
-                // Prepare prompt for AI service
-                String prompt = "Process the medication: " + medicationString + " with RxNormCode: " + rxNormCode;
+                // Prepare prompt for AI service with assumptions
+                String prompt = "Process the medication: " + medicationString + " with RxNormCode: " + rxNormCode + ". Return JSON with fields: AI_Drugname, AI_Strength, AI_Formulation, AI_Route, AI_Assumptions";
                 String aiResponse = callAIService(prompt);
 
-                // Store the response in a variable (for demonstration)
+                // Parse AI response and load into database
                 System.out.println("AI Response for " + medicationString + ": " + aiResponse);
+                parseAndStoreAIResponse(connection, medicationString, rxNormCode, aiResponse);
             }
 
             resultSet.close();
@@ -68,6 +72,48 @@ public class MedicationAIProcessor {
             return response.toString();
         } else {
             return "AI service failed with response code: " + responseCode;
+        }
+    }
+
+    private static void parseAndStoreAIResponse(Connection connection, String medicationString, String rxNormCode, String aiResponse) {
+        try {
+            JSONObject jsonObject = new JSONObject(aiResponse);
+            
+            // Extract parsed medication data from JSON
+            String aiDrugname = jsonObject.optString("AI_Drugname", "");
+            String aiStrength = jsonObject.optString("AI_Strength", "");
+            String aiFormulation = jsonObject.optString("AI_Formulation", "");
+            String aiRoute = jsonObject.optString("AI_Route", "");
+            String aiAssumptions = jsonObject.optString("AI_Assumptions", "");
+
+            // Insert into ParsedMedications table
+            insertParsedMedication(connection, medicationString, rxNormCode, aiDrugname, aiStrength, aiFormulation, aiRoute, aiAssumptions);
+
+        } catch (Exception e) {
+            System.err.println("Error parsing AI response for " + medicationString + ": " + e.getMessage());
+        }
+    }
+
+    private static void insertParsedMedication(Connection connection, String medicationString, String rxNormCode, 
+                                               String aiDrugname, String aiStrength, String aiFormulation, 
+                                               String aiRoute, String aiAssumptions) {
+        String sql = "INSERT INTO ParsedMedications (MedicationString, RxNormCode, AI_Drugname, AI_Strength, AI_Formulation, AI_Route, AI_Assumptions) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setString(1, medicationString);
+            pstmt.setString(2, rxNormCode);
+            pstmt.setString(3, aiDrugname);
+            pstmt.setString(4, aiStrength);
+            pstmt.setString(5, aiFormulation);
+            pstmt.setString(6, aiRoute);
+            pstmt.setString(7, aiAssumptions);
+            
+            int rowsInserted = pstmt.executeUpdate();
+            if (rowsInserted > 0) {
+                System.out.println("Successfully inserted parsed data for: " + medicationString);
+            }
+        } catch (Exception e) {
+            System.err.println("Error inserting parsed medication data: " + e.getMessage());
         }
     }
 }
